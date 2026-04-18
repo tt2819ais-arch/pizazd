@@ -1,13 +1,13 @@
 //
-//  HapticManager.swift
-//  Void
+// HapticManager.swift
+// Void
 //
 
 import UIKit
 
 class HapticManager {
     static let shared = HapticManager()
-    
+   
     private let impactLight = UIImpactFeedbackGenerator(style: .light)
     private let impactMedium = UIImpactFeedbackGenerator(style: .medium)
     private let impactHeavy = UIImpactFeedbackGenerator(style: .heavy)
@@ -15,11 +15,11 @@ class HapticManager {
     private let impactRigid = UIImpactFeedbackGenerator(style: .rigid)
     private let selection = UISelectionFeedbackGenerator()
     private let notification = UINotificationFeedbackGenerator()
-    
+   
     private init() {
         prepare()
     }
-    
+   
     func prepare() {
         impactLight.prepare()
         impactMedium.prepare()
@@ -29,7 +29,7 @@ class HapticManager {
         selection.prepare()
         notification.prepare()
     }
-    
+   
     func impact(style: UIImpactFeedbackGenerator.FeedbackStyle) {
         switch style {
         case .light:
@@ -51,12 +51,13 @@ class HapticManager {
             impactMedium.impactOccurred()
         }
     }
-    
-    func selection() {
+   
+    // ← ИСПРАВЛЕНО: переименовали функцию
+    func triggerSelection() {
         selection.selectionChanged()
         selection.prepare()
     }
-    
+   
     func notification(type: UINotificationFeedbackGenerator.FeedbackType) {
         notification.notificationOccurred(type)
         notification.prepare()
