@@ -9,12 +9,11 @@ workflows:
         - app_store_credentials
       
       vars:
-        XCODE_WORKSPACE: "Void.xcodeproj" # Или Void.xcworkspace если используете CocoaPods
+        XCODE_WORKSPACE: "Void.xcodeproj"
         XCODE_SCHEME: "Void"
         BUNDLE_ID: "com.yourcompany.void"
-        APP_STORE_APPLE_ID: 1234567890 # Замените на ваш App Store ID
       
-      xcode: 15.2
+      xcode: latest  # Используем последнюю доступную версию
       cocoapods: default
     
     triggering:
@@ -31,48 +30,25 @@ workflows:
       - name: 🔍 Show Xcode version
         script: |
           xcodebuild -version
+          xcrun simctl list runtimes
           
-      - name: 📦 Install dependencies
+      - name: 📦 Set iOS Deployment Target
         script: |
-          # Если используете CocoaPods:
-          # pod install
+          # Проверяем, какая версия iOS SDK доступна
+          xcodebuild -showsdks
           
-          # Если используете SPM, ничего не нужно
-          echo "No dependencies to install"
-      
-      - name: 🧪 Run tests (optional)
+      - name: 🏗️ Build iOS app for simulator (Debug)
         script: |
           xcodebuild \
             -project "$XCODE_WORKSPACE" \
             -scheme "$XCODE_SCHEME" \
             -sdk iphonesimulator \
-            -destination 'platform=iOS Simulator,name=iPhone 15 Pro,OS=17.2' \
-            test
-        test_report: build/ios/test/*.xml
-        ignore_failure: true
-      
-      - name: 🔨 Build iOS app
-        script: |
-          xcodebuild \
-            -project "$XCODE_WORKSPACE" \
-            -scheme "$XCODE_SCHEME" \
-            -sdk iphoneos \
-            -configuration Release \
-            -archivePath $HOME/Void.xcarchive \
-            clean archive | xcpretty
-      
-      - name: 📱 Export IPA
-        script: |
-          xcodebuild \
-            -exportArchive \
-            -archivePath $HOME/Void.xcarchive \
-            -exportOptionsPlist $HOME/export_options.plist \
-            -exportPath $HOME/export
+            -configuration Debug \
+            -destination 'platform=iOS Simulator,name=iPhone 15 Pro' \
+            clean build | xcpretty && exit ${PIPESTATUS[0]}
     
     artifacts:
-      - $HOME/export/*.ipa
       - /tmp/xcodebuild_logs/*.log
-      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
     
     publishing:
       email:
@@ -92,7 +68,7 @@ workflows:
         XCODE_WORKSPACE: "Void.xcodeproj"
         XCODE_SCHEME: "Void"
       
-      xcode: 15.2
+      xcode: latest
     
     triggering:
       events:
@@ -104,12 +80,21 @@ workflows:
         - pattern: 'feature/*'
           include: true
           source: true
+        - pattern: 'main'
+          include: true
+          source: true
     
     scripts:
       - name: 🔍 Show environment
         script: |
+          echo "Xcode version:"
           xcodebuild -version
+          echo ""
+          echo "Available SDKs:"
           xcodebuild -showsdks
+          echo ""
+          echo "Available simulators:"
+          xcrun simctl list devices available
       
       - name: 🏗️ Build for simulator
         script: |
@@ -118,8 +103,7 @@ workflows:
             -scheme "$XCODE_SCHEME" \
             -sdk iphonesimulator \
             -configuration Debug \
-            -destination 'platform=iOS Simulator,name=iPhone 15 Pro,OS=17.2' \
-            build | xcpretty
+            clean build | xcpretty && exit ${PIPESTATUS[0]}
     
     artifacts:
       - /tmp/xcodebuild_logs/*.log
@@ -130,4 +114,52 @@ workflows:
           - your-email@example.com
         notify:
           success: false
+          failure: true
+
+  ios-void-archive:
+    name: Void - Archive Build (No Signing)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    
+    environment:
+      vars:
+        XCODE_WORKSPACE: "Void.xcodeproj"
+        XCODE_SCHEME: "Void"
+      
+      xcode: latest
+    
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: 'v*'
+          include: true
+    
+    scripts:
+      - name: 🔍 Show environment
+        script: |
+          xcodebuild -version
+          
+      - name: 🏗️ Build for device (without signing)
+        script: |
+          xcodebuild \
+            -project "$XCODE_WORKSPACE" \
+            -scheme "$XCODE_SCHEME" \
+            -sdk iphoneos \
+            -configuration Release \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            clean build | xcpretty && exit ${PIPESTATUS[0]}
+    
+    artifacts:
+      - build/Release-iphoneos/*.app
+      - /tmp/xcodebuild_logs/*.log
+    
+    publishing:
+      email:
+        recipients:
+          - your-email@example.com
+        notify:
+          success: true
           failure: true
