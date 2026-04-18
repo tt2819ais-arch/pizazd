@@ -1,7 +1,7 @@
 workflows:
   ios-void-ipa:
-    name: Void - IPA Build (with XcodeGen)
-    max_build_duration: 40
+    name: Void - Build .app (Unsigned)
+    max_build_duration: 30
     instance_type: mac_mini_m2
 
     environment:
@@ -17,9 +17,6 @@ workflows:
           name: Void
           options:
             bundleIdPrefix: com.tt2819ais
-            deploymentTarget:
-              iOS: "18.0"
-          
           targets:
             Void:
               type: application
@@ -30,9 +27,7 @@ workflows:
                     - ".git"
                     - ".github"
                     - "project.yml"
-                    - "ExportOptions.plist"
                     - "*.md"
-                    - "cod*"
               settings:
                 base:
                   PRODUCT_NAME: Void
@@ -41,8 +36,6 @@ workflows:
                   CODE_SIGN_IDENTITY: ""
                   CODE_SIGNING_REQUIRED: NO
                   CODE_SIGNING_ALLOWED: NO
-                  ENABLE_BITCODE: NO
-                  SWIFT_VERSION: 5.0
           EOF
 
       - name: Create Info.plist
@@ -60,70 +53,35 @@ workflows:
               <string>1.0</string>
               <key>CFBundleVersion</key>
               <string>1</string>
-              <key>UIRequiredDeviceCapabilities</key>
-              <array><string>arm64</string></array>
-              <key>UISupportedInterfaceOrientations</key>
-              <array>
-                  <string>UIInterfaceOrientationPortrait</string>
-                  <string>UIInterfaceOrientationLandscapeLeft</string>
-                  <string>UIInterfaceOrientationLandscapeRight</string>
-              </array>
           </dict>
           </plist>
           EOF
 
-      - name: Generate Xcode project
+      - name: Generate Xcode project + Build .app
         script: |
           xcodegen generate
-          echo "✅ Project generated"
-
-      - name: Archive and Export IPA
-        script: |
-          set -e
           
-          echo "=== Archiving ==="
-          xcodebuild archive \
+          xcodebuild build \
             -project Void.xcodeproj \
             -scheme Void \
             -sdk iphoneos \
             -configuration Release \
-            -archivePath ./build/Void.xcarchive \
+            -derivedDataPath ./build/DerivedData \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            ENABLE_BITCODE=NO
+            CODE_SIGNING_ALLOWED=NO
 
-          echo "=== Creating ExportOptions.plist ==="
-          cat > ExportOptions.plist << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>ad-hoc</string>
-              <key>signingStyle</key>
-              <string>manual</string>
-              <key>teamID</key>
-              <string>0000000000</string>
-              <key>generateBitcode</key>
-              <false/>
-          </dict>
-          </plist>
-          EOF
-
-          echo "=== Exporting IPA ==="
-          xcodebuild -exportArchive \
-            -archivePath ./build/Void.xcarchive \
-            -exportOptionsPlist ExportOptions.plist \
-            -exportPath ./build/ipa \
-            -allowProvisioningUpdates NO
-
-          echo "✅ IPA created successfully!"
-          ls -la ./build/ipa
+          # Копируем .app
+          mkdir -p ./build/artifact
+          cp -R ./build/DerivedData/Build/Products/Release-iphoneos/Void.app ./build/artifact/
+          
+          # Делаем zip (это и будет твой "ipa" по сути)
+          cd ./build/artifact
+          zip -r Void-app.zip Void.app
+          ls -la
 
     artifacts:
-      - build/ipa/*.ipa
-      - build/Void.xcarchive
+      - build/artifact/Void-app.zip
 
     publishing:
       email:
