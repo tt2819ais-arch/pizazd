@@ -1,0 +1,85 @@
+name: Build iOS IPA
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # чтобы можно было запускать вручную
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Xcode project with XcodeGen
+        run: |
+          brew install xcodegen
+          cat > project.yml << EOF
+          name: Void
+          options:
+            bundleIdPrefix: com.tt2819ais.void
+          targets:
+            Void:
+              type: application
+              platform: iOS
+              deploymentTarget: "18.0"
+              sources:
+                - path: .
+                  excludes:
+                    - ".github"
+                    - "project.yml"
+                    - "*.md"
+              settings:
+                base:
+                  PRODUCT_NAME: Void
+                  INFOPLIST_FILE: Info.plist
+                  CODE_SIGN_IDENTITY: ""
+                  CODE_SIGNING_REQUIRED: NO
+                  CODE_SIGNING_ALLOWED: NO
+          EOF
+
+      - name: Create minimal Info.plist
+        run: |
+          cat > Info.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleIdentifier</key>
+              <string>com.tt2819ais.void</string>
+              <key>CFBundleName</key>
+              <string>Void</string>
+              <key>CFBundleShortVersionString</key>
+              <string>1.0</string>
+              <key>CFBundleVersion</key>
+              <string>1</string>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Generate .xcodeproj
+        run: xcodegen generate
+
+      - name: Archive and export IPA (unsigned)
+        run: |
+          xcodebuild archive \
+            -project Void.xcodeproj \
+            -scheme Void \
+            -sdk iphoneos \
+            -configuration Release \
+            -archivePath ./build/Void.xcarchive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+          xcodebuild -exportArchive \
+            -archivePath ./build/Void.xcarchive \
+            -exportOptionsPlist ./ExportOptions.plist \
+            -exportPath ./build/ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Void-IPA
+          path: build/ipa/*.ipa
