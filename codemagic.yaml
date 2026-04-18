@@ -1,0 +1,133 @@
+workflows:
+  ios-void-production:
+    name: Void - Production Build
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    
+    environment:
+      groups:
+        - app_store_credentials
+      
+      vars:
+        XCODE_WORKSPACE: "Void.xcodeproj" # Или Void.xcworkspace если используете CocoaPods
+        XCODE_SCHEME: "Void"
+        BUNDLE_ID: "com.yourcompany.void"
+        APP_STORE_APPLE_ID: 1234567890 # Замените на ваш App Store ID
+      
+      xcode: 15.2
+      cocoapods: default
+    
+    triggering:
+      events:
+        - push
+        - tag
+        - pull_request
+      branch_patterns:
+        - pattern: 'main'
+          include: true
+          source: true
+    
+    scripts:
+      - name: 🔍 Show Xcode version
+        script: |
+          xcodebuild -version
+          
+      - name: 📦 Install dependencies
+        script: |
+          # Если используете CocoaPods:
+          # pod install
+          
+          # Если используете SPM, ничего не нужно
+          echo "No dependencies to install"
+      
+      - name: 🧪 Run tests (optional)
+        script: |
+          xcodebuild \
+            -project "$XCODE_WORKSPACE" \
+            -scheme "$XCODE_SCHEME" \
+            -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=iPhone 15 Pro,OS=17.2' \
+            test
+        test_report: build/ios/test/*.xml
+        ignore_failure: true
+      
+      - name: 🔨 Build iOS app
+        script: |
+          xcodebuild \
+            -project "$XCODE_WORKSPACE" \
+            -scheme "$XCODE_SCHEME" \
+            -sdk iphoneos \
+            -configuration Release \
+            -archivePath $HOME/Void.xcarchive \
+            clean archive | xcpretty
+      
+      - name: 📱 Export IPA
+        script: |
+          xcodebuild \
+            -exportArchive \
+            -archivePath $HOME/Void.xcarchive \
+            -exportOptionsPlist $HOME/export_options.plist \
+            -exportPath $HOME/export
+    
+    artifacts:
+      - $HOME/export/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
+    
+    publishing:
+      email:
+        recipients:
+          - your-email@example.com
+        notify:
+          success: true
+          failure: true
+
+  ios-void-debug:
+    name: Void - Debug Build (Quick)
+    max_build_duration: 30
+    instance_type: mac_mini_m2
+    
+    environment:
+      vars:
+        XCODE_WORKSPACE: "Void.xcodeproj"
+        XCODE_SCHEME: "Void"
+      
+      xcode: 15.2
+    
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: 'develop'
+          include: true
+          source: true
+        - pattern: 'feature/*'
+          include: true
+          source: true
+    
+    scripts:
+      - name: 🔍 Show environment
+        script: |
+          xcodebuild -version
+          xcodebuild -showsdks
+      
+      - name: 🏗️ Build for simulator
+        script: |
+          xcodebuild \
+            -project "$XCODE_WORKSPACE" \
+            -scheme "$XCODE_SCHEME" \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -destination 'platform=iOS Simulator,name=iPhone 15 Pro,OS=17.2' \
+            build | xcpretty
+    
+    artifacts:
+      - /tmp/xcodebuild_logs/*.log
+    
+    publishing:
+      email:
+        recipients:
+          - your-email@example.com
+        notify:
+          success: false
+          failure: true
