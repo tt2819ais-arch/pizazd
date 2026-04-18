@@ -5,19 +5,11 @@ workflows:
     instance_type: mac_mini_m2
 
     environment:
-      vars:
-        XCODE_SCHEME: "Void"
       xcode: latest
-
-    triggering:
-      events:
-        - push
-        - manual
 
     scripts:
       - name: Install XcodeGen
-        script: |
-          brew install xcodegen
+        script: brew install xcodegen
 
       - name: Create project.yml
         script: |
@@ -35,21 +27,25 @@ workflows:
               sources:
                 - path: .
                   excludes:
-                    - "project.yml"
                     - ".git"
+                    - ".github"
+                    - "project.yml"
+                    - "ExportOptions.plist"
                     - "*.md"
-                    - "codmag*"
+                    - "cod*"
               settings:
                 base:
                   PRODUCT_NAME: Void
+                  PRODUCT_BUNDLE_IDENTIFIER: com.tt2819ais.void
                   INFOPLIST_FILE: Info.plist
                   CODE_SIGN_IDENTITY: ""
                   CODE_SIGNING_REQUIRED: NO
                   CODE_SIGNING_ALLOWED: NO
                   ENABLE_BITCODE: NO
+                  SWIFT_VERSION: 5.0
           EOF
 
-      - name: Create minimal Info.plist
+      - name: Create Info.plist
         script: |
           cat > Info.plist << EOF
           <?xml version="1.0" encoding="UTF-8"?>
@@ -66,13 +62,20 @@ workflows:
               <string>1</string>
               <key>UIRequiredDeviceCapabilities</key>
               <array><string>arm64</string></array>
+              <key>UISupportedInterfaceOrientations</key>
+              <array>
+                  <string>UIInterfaceOrientationPortrait</string>
+                  <string>UIInterfaceOrientationLandscapeLeft</string>
+                  <string>UIInterfaceOrientationLandscapeRight</string>
+              </array>
           </dict>
           </plist>
           EOF
 
-      - name: Generate .xcodeproj
+      - name: Generate Xcode project
         script: |
           xcodegen generate
+          echo "Generated files:"
           ls -la
 
       - name: Archive and Export IPA
@@ -90,7 +93,7 @@ workflows:
             CODE_SIGNING_ALLOWED=NO \
             ENABLE_BITCODE=NO
           
-          # Export IPA
+          # Export Options без профиля
           cat > ExportOptions.plist << EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -98,6 +101,14 @@ workflows:
           <dict>
               <key>method</key>
               <string>development</string>
+              <key>signingStyle</key>
+              <string>manual</string>
+              <key>signingCertificate</key>
+              <string></string>
+              <key>provisioningProfiles</key>
+              <dict/>
+              <key>teamID</key>
+              <string></string>
           </dict>
           </plist>
           EOF
@@ -105,13 +116,14 @@ workflows:
           xcodebuild -exportArchive \
             -archivePath ./build/Void.xcarchive \
             -exportOptionsPlist ExportOptions.plist \
-            -exportPath ./build/ipa
+            -exportPath ./build/ipa \
+            -allowProvisioningUpdates NO
           
-          echo "✅ IPA успешно создан!"
+          echo "✅ IPA created successfully!"
 
     artifacts:
       - build/ipa/*.ipa
-      - Void.xcodeproj
+      - build/Void.xcarchive
 
     publishing:
       email:
