@@ -1,210 +1,122 @@
 workflows:
-  # ============================================
-  # 🚀 ОСНОВНОЙ WORKFLOW - Debug сборка
-  # ============================================
-  ios-void-debug:
-    name: Void - Debug Build
-    max_build_duration: 30
+  ios-void-ipa:
+    name: Void - IPA Build (with XcodeGen)
+    max_build_duration: 40
     instance_type: mac_mini_m2
-    
+
     environment:
       vars:
-        XCODE_PROJECT: "Void.xcodeproj"
         XCODE_SCHEME: "Void"
       xcode: latest
-    
+
     triggering:
       events:
         - push
-      branch_patterns:
-        - pattern: '*'
-          include: true
-          source: true
-    
-    scripts:
-      - name: 🔍 Show Build Environment
-        script: |
-          echo "======================================"
-          echo "🔧 Xcode Version:"
-          xcodebuild -version
-          echo ""
-          echo "📱 Available iOS SDKs:"
-          xcodebuild -showsdks | grep iOS
-          echo ""
-          echo "🎯 Available Simulators:"
-          xcrun simctl list devices available | grep iPhone | head -5
-          echo "======================================"
-      
-      - name: 🏗️ Build for iOS Simulator
-        script: |
-          set -e
-          set -x
-          
-          xcodebuild \
-            -project "$XCODE_PROJECT" \
-            -scheme "$XCODE_SCHEME" \
-            -sdk iphonesimulator \
-            -configuration Debug \
-            -destination 'platform=iOS Simulator,name=iPhone 15 Pro' \
-            clean build \
-            | tee build.log \
-            | xcpretty
-          
-          echo "✅ Build completed successfully!"
-    
-    artifacts:
-      - build.log
-      - /tmp/xcodebuild_logs/*.log
-      - ~/Library/Logs/DiagnosticReports/*.crash
-    
-    publishing:
-      email:
-        recipients:
-          - voidapp.build@gmail.com
-        notify:
-          success: true
-          failure: true
+        - manual
 
-  # ============================================
-  # 📦 PRODUCTION - Archive без подписи
-  # ============================================
-  ios-void-archive:
-    name: Void - Production Archive
-    max_build_duration: 45
-    instance_type: mac_mini_m2
-    
-    environment:
-      vars:
-        XCODE_PROJECT: "Void.xcodeproj"
-        XCODE_SCHEME: "Void"
-      xcode: latest
-    
-    triggering:
-      events:
-        - tag
-      tag_patterns:
-        - pattern: 'v*.*.*'
-          include: true
-    
     scripts:
-      - name: 🔍 Environment Info
+      - name: Install XcodeGen
         script: |
-          xcodebuild -version
-          xcodebuild -showsdks | grep iphoneos
-      
-      - name: 🏗️ Archive for Device (No Code Signing)
+          brew install xcodegen
+
+      - name: Create project.yml
+        script: |
+          cat > project.yml << EOF
+          name: Void
+          options:
+            bundleIdPrefix: com.tt2819ais
+            deploymentTarget:
+              iOS: "18.0"
+          
+          targets:
+            Void:
+              type: application
+              platform: iOS
+              sources:
+                - path: .
+                  excludes:
+                    - "project.yml"
+                    - ".git"
+                    - "*.md"
+                    - "codmag*"
+              settings:
+                base:
+                  PRODUCT_NAME: Void
+                  INFOPLIST_FILE: Info.plist
+                  CODE_SIGN_IDENTITY: ""
+                  CODE_SIGNING_REQUIRED: NO
+                  CODE_SIGNING_ALLOWED: NO
+                  ENABLE_BITCODE: NO
+          EOF
+
+      - name: Create minimal Info.plist
+        script: |
+          cat > Info.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleIdentifier</key>
+              <string>com.tt2819ais.void</string>
+              <key>CFBundleName</key>
+              <string>Void</string>
+              <key>CFBundleShortVersionString</key>
+              <string>1.0</string>
+              <key>CFBundleVersion</key>
+              <string>1</string>
+              <key>UIRequiredDeviceCapabilities</key>
+              <array><string>arm64</string></array>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Generate .xcodeproj
+        script: |
+          xcodegen generate
+          ls -la
+
+      - name: Archive and Export IPA
         script: |
           set -e
-          set -x
           
-          xcodebuild \
-            -project "$XCODE_PROJECT" \
-            -scheme "$XCODE_SCHEME" \
+          xcodebuild archive \
+            -project Void.xcodeproj \
+            -scheme Void \
             -sdk iphoneos \
             -configuration Release \
-            -derivedDataPath ./build/DerivedData \
+            -archivePath ./build/Void.xcarchive \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            ENABLE_BITCODE=NO \
-            clean build \
-            | tee archive.log \
-            | xcpretty
+            ENABLE_BITCODE=NO
           
-          echo "✅ Archive completed!"
+          # Export IPA
+          cat > ExportOptions.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>development</string>
+          </dict>
+          </plist>
+          EOF
           
-          # Найти .app файл
-          find ./build -name "*.app" -type d
-      
-      - name: 📦 Package Build Info
-        script: |
-          echo "=== Build Info ===" > build_info.txt
-          echo "Version: ${CM_TAG}" >> build_info.txt
-          echo "Build Date: $(date)" >> build_info.txt
-          echo "Xcode: $(xcodebuild -version | head -1)" >> build_info.txt
-          echo "Git Commit: ${CM_COMMIT}" >> build_info.txt
-          cat build_info.txt
-    
-    artifacts:
-      - build/DerivedData/Build/Products/Release-iphoneos/*.app
-      - archive.log
-      - build_info.txt
-      - /tmp/xcodebuild_logs/*.log
-    
-    publishing:
-      email:
-        recipients:
-          - voidapp.build@gmail.com
-        notify:
-          success: true
-          failure: true
+          xcodebuild -exportArchive \
+            -archivePath ./build/Void.xcarchive \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath ./build/ipa
+          
+          echo "✅ IPA успешно создан!"
 
-  # ============================================
-  # 🧪 MANUAL TEST - Ручной запуск
-  # ============================================
-  ios-void-manual:
-    name: Void - Manual Test Build
-    max_build_duration: 30
-    instance_type: mac_mini_m2
-    
-    environment:
-      vars:
-        XCODE_PROJECT: "Void.xcodeproj"
-        XCODE_SCHEME: "Void"
-      xcode: latest
-    
-    # Нет триггеров - только ручной запуск
-    
-    scripts:
-      - name: 🔍 Full Environment Report
-        script: |
-          echo "======================================"
-          echo "🖥️  SYSTEM INFO"
-          echo "======================================"
-          sw_vers
-          echo ""
-          
-          echo "======================================"
-          echo "🔧 XCODE INFO"
-          echo "======================================"
-          xcodebuild -version
-          xcode-select -p
-          echo ""
-          
-          echo "======================================"
-          echo "📱 ALL iOS SDKs"
-          echo "======================================"
-          xcodebuild -showsdks
-          echo ""
-          
-          echo "======================================"
-          echo "🎯 ALL SIMULATORS"
-          echo "======================================"
-          xcrun simctl list devices
-          echo ""
-          
-          echo "======================================"
-          echo "📦 PROJECT INFO"
-          echo "======================================"
-          xcodebuild -list -project "$XCODE_PROJECT"
-          echo ""
-      
-      - name: 🏗️ Test Build
-        script: |
-          xcodebuild \
-            -project "$XCODE_PROJECT" \
-            -scheme "$XCODE_SCHEME" \
-            -sdk iphonesimulator \
-            -configuration Debug \
-            build
-    
     artifacts:
-      - /tmp/xcodebuild_logs/*.log
-    
+      - build/ipa/*.ipa
+      - Void.xcodeproj
+
     publishing:
       email:
         recipients:
-          - voidapp.build@gmail.com
+          - tt2819ais@gmail.com
         notify:
           success: true
           failure: true
