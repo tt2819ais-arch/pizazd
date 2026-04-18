@@ -1,165 +1,210 @@
 workflows:
-  ios-void-production:
-    name: Void - Production Build
-    max_build_duration: 60
-    instance_type: mac_mini_m2
-    
-    environment:
-      groups:
-        - app_store_credentials
-      
-      vars:
-        XCODE_WORKSPACE: "Void.xcodeproj"
-        XCODE_SCHEME: "Void"
-        BUNDLE_ID: "com.yourcompany.void"
-      
-      xcode: latest  # Используем последнюю доступную версию
-      cocoapods: default
-    
-    triggering:
-      events:
-        - push
-        - tag
-        - pull_request
-      branch_patterns:
-        - pattern: 'main'
-          include: true
-          source: true
-    
-    scripts:
-      - name: 🔍 Show Xcode version
-        script: |
-          xcodebuild -version
-          xcrun simctl list runtimes
-          
-      - name: 📦 Set iOS Deployment Target
-        script: |
-          # Проверяем, какая версия iOS SDK доступна
-          xcodebuild -showsdks
-          
-      - name: 🏗️ Build iOS app for simulator (Debug)
-        script: |
-          xcodebuild \
-            -project "$XCODE_WORKSPACE" \
-            -scheme "$XCODE_SCHEME" \
-            -sdk iphonesimulator \
-            -configuration Debug \
-            -destination 'platform=iOS Simulator,name=iPhone 15 Pro' \
-            clean build | xcpretty && exit ${PIPESTATUS[0]}
-    
-    artifacts:
-      - /tmp/xcodebuild_logs/*.log
-    
-    publishing:
-      email:
-        recipients:
-          - your-email@example.com
-        notify:
-          success: true
-          failure: true
-
+  # ============================================
+  # 🚀 ОСНОВНОЙ WORKFLOW - Debug сборка
+  # ============================================
   ios-void-debug:
-    name: Void - Debug Build (Quick)
+    name: Void - Debug Build
     max_build_duration: 30
     instance_type: mac_mini_m2
     
     environment:
       vars:
-        XCODE_WORKSPACE: "Void.xcodeproj"
+        XCODE_PROJECT: "Void.xcodeproj"
         XCODE_SCHEME: "Void"
-      
       xcode: latest
     
     triggering:
       events:
         - push
       branch_patterns:
-        - pattern: 'develop'
-          include: true
-          source: true
-        - pattern: 'feature/*'
-          include: true
-          source: true
-        - pattern: 'main'
+        - pattern: '*'
           include: true
           source: true
     
     scripts:
-      - name: 🔍 Show environment
+      - name: 🔍 Show Build Environment
         script: |
-          echo "Xcode version:"
+          echo "======================================"
+          echo "🔧 Xcode Version:"
           xcodebuild -version
           echo ""
-          echo "Available SDKs:"
-          xcodebuild -showsdks
+          echo "📱 Available iOS SDKs:"
+          xcodebuild -showsdks | grep iOS
           echo ""
-          echo "Available simulators:"
-          xcrun simctl list devices available
+          echo "🎯 Available Simulators:"
+          xcrun simctl list devices available | grep iPhone | head -5
+          echo "======================================"
       
-      - name: 🏗️ Build for simulator
+      - name: 🏗️ Build for iOS Simulator
         script: |
+          set -e
+          set -x
+          
           xcodebuild \
-            -project "$XCODE_WORKSPACE" \
+            -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             -sdk iphonesimulator \
             -configuration Debug \
-            clean build | xcpretty && exit ${PIPESTATUS[0]}
+            -destination 'platform=iOS Simulator,name=iPhone 15 Pro' \
+            clean build \
+            | tee build.log \
+            | xcpretty
+          
+          echo "✅ Build completed successfully!"
     
     artifacts:
+      - build.log
       - /tmp/xcodebuild_logs/*.log
+      - ~/Library/Logs/DiagnosticReports/*.crash
     
     publishing:
       email:
         recipients:
-          - your-email@example.com
+          - voidapp.build@gmail.com
         notify:
-          success: false
+          success: true
           failure: true
 
+  # ============================================
+  # 📦 PRODUCTION - Archive без подписи
+  # ============================================
   ios-void-archive:
-    name: Void - Archive Build (No Signing)
-    max_build_duration: 60
+    name: Void - Production Archive
+    max_build_duration: 45
     instance_type: mac_mini_m2
     
     environment:
       vars:
-        XCODE_WORKSPACE: "Void.xcodeproj"
+        XCODE_PROJECT: "Void.xcodeproj"
         XCODE_SCHEME: "Void"
-      
       xcode: latest
     
     triggering:
       events:
         - tag
       tag_patterns:
-        - pattern: 'v*'
+        - pattern: 'v*.*.*'
           include: true
     
     scripts:
-      - name: 🔍 Show environment
+      - name: 🔍 Environment Info
         script: |
           xcodebuild -version
-          
-      - name: 🏗️ Build for device (without signing)
+          xcodebuild -showsdks | grep iphoneos
+      
+      - name: 🏗️ Archive for Device (No Code Signing)
         script: |
+          set -e
+          set -x
+          
           xcodebuild \
-            -project "$XCODE_WORKSPACE" \
+            -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             -sdk iphoneos \
             -configuration Release \
+            -derivedDataPath ./build/DerivedData \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            clean build | xcpretty && exit ${PIPESTATUS[0]}
+            ENABLE_BITCODE=NO \
+            clean build \
+            | tee archive.log \
+            | xcpretty
+          
+          echo "✅ Archive completed!"
+          
+          # Найти .app файл
+          find ./build -name "*.app" -type d
+      
+      - name: 📦 Package Build Info
+        script: |
+          echo "=== Build Info ===" > build_info.txt
+          echo "Version: ${CM_TAG}" >> build_info.txt
+          echo "Build Date: $(date)" >> build_info.txt
+          echo "Xcode: $(xcodebuild -version | head -1)" >> build_info.txt
+          echo "Git Commit: ${CM_COMMIT}" >> build_info.txt
+          cat build_info.txt
     
     artifacts:
-      - build/Release-iphoneos/*.app
+      - build/DerivedData/Build/Products/Release-iphoneos/*.app
+      - archive.log
+      - build_info.txt
       - /tmp/xcodebuild_logs/*.log
     
     publishing:
       email:
         recipients:
-          - your-email@example.com
+          - voidapp.build@gmail.com
+        notify:
+          success: true
+          failure: true
+
+  # ============================================
+  # 🧪 MANUAL TEST - Ручной запуск
+  # ============================================
+  ios-void-manual:
+    name: Void - Manual Test Build
+    max_build_duration: 30
+    instance_type: mac_mini_m2
+    
+    environment:
+      vars:
+        XCODE_PROJECT: "Void.xcodeproj"
+        XCODE_SCHEME: "Void"
+      xcode: latest
+    
+    # Нет триггеров - только ручной запуск
+    
+    scripts:
+      - name: 🔍 Full Environment Report
+        script: |
+          echo "======================================"
+          echo "🖥️  SYSTEM INFO"
+          echo "======================================"
+          sw_vers
+          echo ""
+          
+          echo "======================================"
+          echo "🔧 XCODE INFO"
+          echo "======================================"
+          xcodebuild -version
+          xcode-select -p
+          echo ""
+          
+          echo "======================================"
+          echo "📱 ALL iOS SDKs"
+          echo "======================================"
+          xcodebuild -showsdks
+          echo ""
+          
+          echo "======================================"
+          echo "🎯 ALL SIMULATORS"
+          echo "======================================"
+          xcrun simctl list devices
+          echo ""
+          
+          echo "======================================"
+          echo "📦 PROJECT INFO"
+          echo "======================================"
+          xcodebuild -list -project "$XCODE_PROJECT"
+          echo ""
+      
+      - name: 🏗️ Test Build
+        script: |
+          xcodebuild \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            build
+    
+    artifacts:
+      - /tmp/xcodebuild_logs/*.log
+    
+    publishing:
+      email:
+        recipients:
+          - voidapp.build@gmail.com
         notify:
           success: true
           failure: true
