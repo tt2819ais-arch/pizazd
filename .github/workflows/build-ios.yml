@@ -3,7 +3,9 @@ name: Build iOS IPA
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:  # чтобы можно было запускать вручную
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -12,36 +14,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Generate Xcode project with XcodeGen
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project.yml
         run: |
-          brew install xcodegen
-          cat > project.yml << EOF
+          cat > project.yml << 'EOF'
           name: Void
           options:
-            bundleIdPrefix: com.tt2819ais.void
+            bundleIdPrefix: com.tt2819ais
           targets:
             Void:
               type: application
               platform: iOS
-              deploymentTarget: "18.0"
+              deploymentTarget: "17.0"
               sources:
                 - path: .
                   excludes:
+                    - ".git"
                     - ".github"
+                    - "build"
                     - "project.yml"
+                    - "Info.plist"
                     - "*.md"
               settings:
                 base:
                   PRODUCT_NAME: Void
+                  PRODUCT_BUNDLE_IDENTIFIER: com.tt2819ais.void
                   INFOPLIST_FILE: Info.plist
                   CODE_SIGN_IDENTITY: ""
                   CODE_SIGNING_REQUIRED: NO
                   CODE_SIGNING_ALLOWED: NO
+                  TARGETED_DEVICE_FAMILY: "1,2"
           EOF
 
-      - name: Create minimal Info.plist
+      - name: Generate Info.plist
         run: |
-          cat > Info.plist << EOF
+          cat > Info.plist << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -50,36 +59,62 @@ jobs:
               <string>com.tt2819ais.void</string>
               <key>CFBundleName</key>
               <string>Void</string>
+              <key>CFBundleDisplayName</key>
+              <string>Void</string>
               <key>CFBundleShortVersionString</key>
               <string>1.0</string>
               <key>CFBundleVersion</key>
               <string>1</string>
+              <key>CFBundleExecutable</key>
+              <string>Void</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>LSRequiresIPhoneOS</key>
+              <true/>
+              <key>UILaunchScreen</key>
+              <dict/>
+              <key>UISupportedInterfaceOrientations</key>
+              <array>
+                  <string>UIInterfaceOrientationPortrait</string>
+              </array>
           </dict>
           </plist>
           EOF
 
-      - name: Generate .xcodeproj
+      - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Archive and export IPA (unsigned)
+      - name: Build .app (unsigned, iphoneos)
         run: |
-          xcodebuild archive \
+          xcodebuild build \
             -project Void.xcodeproj \
             -scheme Void \
             -sdk iphoneos \
             -configuration Release \
-            -archivePath ./build/Void.xcarchive \
+            -derivedDataPath ./build/DerivedData \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=NO
 
-          xcodebuild -exportArchive \
-            -archivePath ./build/Void.xcarchive \
-            -exportOptionsPlist ./ExportOptions.plist \
-            -exportPath ./build/ipa
+      - name: Package unsigned IPA
+        run: |
+          APP_PATH="./build/DerivedData/Build/Products/Release-iphoneos/Void.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "Void.app not found at $APP_PATH"
+            find ./build/DerivedData/Build/Products -maxdepth 4 -name "*.app" -print
+            exit 1
+          fi
+          mkdir -p build/ipa/Payload
+          cp -R "$APP_PATH" build/ipa/Payload/
+          cd build/ipa
+          zip -qr Void-unsigned.ipa Payload
+          ls -la
+          rm -rf Payload
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: Void-IPA
-          path: build/ipa/*.ipa
+          path: build/ipa/Void-unsigned.ipa
+          if-no-files-found: error
